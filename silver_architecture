@@ -1,0 +1,40 @@
+from pyspark.sql.functions import col, from_json
+from pyspark.sql.types import StructType, StructField, StringType
+
+catalog = "onepiece"  # <-- Replace with your catalog name
+
+# 1. Define the structure of the JSON string
+name_schema = StructType([
+    StructField("en", StringType(), True),
+    StructField("jp", StringType(), True),
+    StructField("romaji", StringType(), True)
+])
+
+# 2. Read from Bronze
+df_bronze = spark.table(f"{catalog}.bronze.onepieceapi_devil_fruits")
+
+# 3. Parse the JSON string and flatten into separate columns
+df_silver = (
+    df_bronze
+    .withColumn("name_en", col("name.en"))
+    .withColumn("name_jp", col("name.jp"))
+    .withColumn("name_romaji", col("name.romaji"))
+    .withColumn("model_en", col("model.en"))
+    .withColumn("model_jp", col("model.jp"))
+    .withColumn("model_romaji", col("model.romaji"))
+    .drop("model")
+    .drop("name")
+    .drop("name_jp")
+    .drop("model_jp")
+)
+
+# 4. Write to Silver Delta table
+(
+    df_silver.write
+    .format("delta")
+    .mode("overwrite")
+    .option("overwriteSchema", "true")
+    .saveAsTable(f"{catalog}.silver.onepieceapi_devil_fruits")
+)
+
+display(df_silver)
