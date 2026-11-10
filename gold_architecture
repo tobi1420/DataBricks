@@ -1,0 +1,26 @@
+from pyspark.sql.functions import col, count, current_timestamp
+
+catalog = "onepiece"  # <-- Replace with your catalog name
+
+df_silver = spark.table(f"{catalog}.silver.onepieceapi_devil_fruits")
+
+# Aggregate business metrics: count fruits per type
+df_gold = (
+    df_silver
+    .groupBy(
+        col("type").alias("fruit_type"),
+        col("name_en").alias("fruit_name"))
+    .agg(count("id").alias("total_fruits"))
+    .orderBy(col("total_fruits").desc())
+    .withColumn("_updated_at", current_timestamp())
+)
+
+(
+    df_gold.write
+    .format("delta")
+    .mode("overwrite")
+    .option("overwriteSchema", "true")
+    .saveAsTable(f"{catalog}.gold.devil_fruits_by_type")
+)
+
+display(df_gold)
