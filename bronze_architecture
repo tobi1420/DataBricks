@@ -1,0 +1,74 @@
+import os
+import json
+import requests
+import time
+from datetime import datetime, timezone
+
+# 1. Configuration
+catalog = "onepiece"  # <-- Replace with your catalog name
+api_name = "onepieceapi"
+endpoint = "devil-fruits"
+url = "https://onepieceapi.com/api"  # <-- Verify your exact endpoint URL
+
+all_records = []
+page = 1
+
+# 2. Fetch data from the REST API
+while True:
+    print(f"Fetching page {page}...")
+    response = requests.get(f"{url}/{endpoint}", params={"page": page}, timeout=30)
+    payload = response.json()
+
+    # Stop the loop when a page has no more records
+    if response.status_code == 500:
+        print("No more records found. Pagination complete.")
+        break
+
+    print(f"Found {len(payload)} records.")
+    
+    # Handle both list responses [...] and dictionary responses {"data": [...]}
+    records = payload if isinstance(payload, list) else payload.get("data", [])
+        
+    all_records.extend(payload)
+    page += 1
+    time.sleep(0.2)  # Short pause to avoid hitting API rate limits
+
+# 3. Create date-partitioned folder in your Volume
+now = datetime.now(timezone.utc)
+folder_path = f"/Volumes/{catalog}/bronze/raw_landing/{api_name}/{endpoint}/{now:%Y/%m/%d}"
+os.makedirs(folder_path, exist_ok=True)
+
+# 4. Save the raw JSON file
+file_path = f"{folder_path}/{endpoint}.json"
+with open(file_path, "w", encoding="utf-8") as f:
+    json.dump(all_records, f, ensure_ascii=False, indent=2)
+
+print(f"Successfully saved {len(all_records)} records to {file_path}")
+
+
+
+from pyspark.sql.functions import current_timestamp, lit
+
+catalog = "onepiece"  # <-- Replace with your catalog name
+volume_path = f"/Volumes/{catalog}/bronze/raw_landing/onepieceapi/devil-fruits/*/*/*/*.json"
+target_table = f"{catalog}.bronze.onepieceapi_devil_fruits"
+
+# 1. Read the JSON files from your Volume
+df = (
+    spark.read
+    .option("multiLine", "true")
+    .json(volume_path)
+    .withColumn("_ingested_at", current_timestamp())
+    .withColumn("_source", lit("onepieceapi"))
+)
+
+# 2. Write to the Bronze Delta table
+(
+    df.write
+    .format("delta")
+    .mode("overwrite")  # Use "append" if you only pull new records each run
+    .option("mergeSchema", "true")
+    .saveAsTable(target_table)
+)
+
+print(f"Loaded {df.count()} rows into {target_table}")
